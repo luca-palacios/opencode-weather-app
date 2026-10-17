@@ -1,15 +1,43 @@
-import type { ForecastDay, TemperatureUnit, WeatherForecastResponse } from "./types";
+import type {
+  Coordinates,
+  CurrentWeatherApiResponse,
+  ForecastApiResponse,
+  ForecastDay,
+} from "../types/Weather";
+import type { TemperatureUnit } from "../types/Settings";
+import { FORECAST_DAYS } from "../utils/constants";
 
-const FORECAST_DAYS = 7;
-
-export async function obtenerPronostico(
-  latitude: number,
-  longitude: number,
-  unit: TemperatureUnit,
-): Promise<ForecastDay[]> {
+export async function getCurrentWeather(
+  { latitude, longitude }: Coordinates,
+): Promise<number> {
   const params = new URLSearchParams({
     latitude: String(latitude),
     longitude: String(longitude),
+    current: "temperature_2m",
+  });
+  const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`);
+
+  if (!response.ok) {
+    throw new Error("No se pudo conectar con la API del clima");
+  }
+
+  const data = (await response.json()) as CurrentWeatherApiResponse;
+  const temperature = data.current?.temperature_2m;
+
+  if (typeof temperature !== "number" || !Number.isFinite(temperature)) {
+    throw new Error("La API devolvió datos de clima inválidos");
+  }
+
+  return temperature;
+}
+
+export async function getWeatherForecast(
+  coordinates: Coordinates,
+  unit: TemperatureUnit,
+): Promise<ForecastDay[]> {
+  const params = new URLSearchParams({
+    latitude: String(coordinates.latitude),
+    longitude: String(coordinates.longitude),
     daily: "temperature_2m_max,temperature_2m_min",
     forecast_days: String(FORECAST_DAYS),
     timezone: "auto",
@@ -21,7 +49,7 @@ export async function obtenerPronostico(
     throw new Error("No se pudo obtener el pronóstico");
   }
 
-  const data = (await response.json()) as WeatherForecastResponse;
+  const data = (await response.json()) as ForecastApiResponse;
   const dates = data.daily?.time;
   const maximums = data.daily?.temperature_2m_max;
   const minimums = data.daily?.temperature_2m_min;

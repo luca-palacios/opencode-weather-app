@@ -23,7 +23,7 @@ The repository contains a Weather CLI application built with Bun.js and the Open
 
 ## Project Structure and Configuration
 
-- **Entry Point:** `index.ts` (as specified in `package.json`).
+- **Entry Point:** `src/index.ts` (as specified in `package.json`).
 - **TypeScript Configuration:** 
   - `tsconfig.json` uses `ESNext` for `lib` and `target`.
   - Module resolution is in `bundler` mode.

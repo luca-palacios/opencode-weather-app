@@ -1,20 +1,26 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AppConfig } from "./types";
+import type { AppConfig } from "../types/Settings";
+import { DEFAULT_TEMPERATURE_UNIT } from "../utils/constants";
 
 const CONFIG_PATH = join(homedir(), ".config", "weather-cli", "config.json");
 
 const DEFAULT_CONFIG: AppConfig = {
   cities: [],
   defaultCity: null,
+  temperatureUnit: DEFAULT_TEMPERATURE_UNIT,
+};
+
+type StoredConfig = Omit<AppConfig, "temperatureUnit"> & {
+  temperatureUnit?: AppConfig["temperatureUnit"];
 };
 
 function hasErrorCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
-function isAppConfig(value: unknown): value is AppConfig {
+function isStoredConfig(value: unknown): value is StoredConfig {
   if (typeof value !== "object" || value === null) return false;
 
   const config = value as Record<string, unknown>;
@@ -23,10 +29,13 @@ function isAppConfig(value: unknown): value is AppConfig {
   return Array.isArray(cities) &&
     cities.every((city) => typeof city === "string") &&
     (config.defaultCity === null ||
-      (typeof config.defaultCity === "string" && cities.includes(config.defaultCity)));
+      (typeof config.defaultCity === "string" && cities.includes(config.defaultCity))) &&
+    (config.temperatureUnit === undefined ||
+      config.temperatureUnit === "C" ||
+      config.temperatureUnit === "F");
 }
 
-export async function cargarConfiguracion(): Promise<AppConfig> {
+export async function loadConfig(): Promise<AppConfig> {
   let contents: string;
 
   try {
@@ -43,14 +52,17 @@ export async function cargarConfiguracion(): Promise<AppConfig> {
     throw new Error(`El archivo de configuración contiene JSON inválido: ${CONFIG_PATH}`);
   }
 
-  if (!isAppConfig(config)) {
+  if (!isStoredConfig(config)) {
     throw new Error(`El archivo de configuración tiene un formato inválido: ${CONFIG_PATH}`);
   }
 
-  return config;
+  return {
+    ...config,
+    temperatureUnit: config.temperatureUnit ?? DEFAULT_TEMPERATURE_UNIT,
+  };
 }
 
-export async function guardarConfiguracion(config: AppConfig): Promise<void> {
+export async function saveConfig(config: AppConfig): Promise<void> {
   try {
     await mkdir(dirname(CONFIG_PATH), { recursive: true });
     await writeFile(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
