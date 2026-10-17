@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out pushed commit
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run tests
+        run: bun run test
+
+      - name: Build Windows executable
+        run: bun build --compile src/index.ts --outfile weather.exe
+
+      - name: Commit version and create tag
+        id: release
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          $published = $false
+          for ($attempt = 1; $attempt -le 10; $attempt++) {
+            git fetch origin main
+            if ($LASTEXITCODE -ne 0) { throw "Failed to fetch main" }
+
+            git checkout -B release-main origin/main
+            if ($LASTEXITCODE -ne 0) { throw "Failed to update release branch" }
+
+            $package = Get-Content package.json -Raw | ConvertFrom-Json
+            if ($package.version -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+              throw "Expected a numeric major.minor.patch version, got '$($package.version)'"
+            }
+
+            $version = "$($Matches[1]).$($Matches[2]).$([int]$Matches[3] + 1)"
+            $package.version = $version
+            $package | ConvertTo-Json -Depth 100 | Set-Content package.json
+            git add package.json
+            git commit -m "chore: release v$version"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to commit version v$version" }
+
+            git push origin HEAD:main
+            if ($LASTEXITCODE -eq 0) {
+              $published = $true
+              break
+            }
+          }
+
+          if (-not $published) { throw "Could not publish a version after 10 attempts" }
+
+          git tag -a "v$version" -m "Release v$version"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create tag v$version" }
+          git push origin "v$version"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to push tag v$version" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "v${{ steps.release.outputs.version }}" weather.exe --title "v${{ steps.release.outputs.version }}" --notes "Windows executable for v${{ steps.release.outputs.version }}" --verify-tag
