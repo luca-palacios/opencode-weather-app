@@ -1,18 +1,19 @@
 import readline from "node:readline/promises";
 import { cyan, green, red, underline, yellow } from "./colors";
+import { obtenerPronostico } from "./forecast";
+import { cargarConfiguracion, guardarConfiguracion } from "./storage";
+import type {
+  AppConfig,
+  Coordinates,
+  CurrentWeatherResponse,
+  GeocodingResponse,
+  TemperatureUnit,
+} from "./types";
 
 // Estado global para manejar la unidad de temperatura
-let unidadTemperatura: "C" | "F" = "C";
+let unidadTemperatura: TemperatureUnit = "C";
 let ciudades: string[] = [];
 let ciudadDefault: string | null = null;
-
-type GeocodingResponse = {
-  results?: Array<{ latitude: number; longitude: number }>;
-};
-
-type WeatherResponse = {
-  current: { temperature_2m: number };
-};
 
 // Interfaz readline global
 const rl = readline.createInterface({
@@ -21,7 +22,7 @@ const rl = readline.createInterface({
 });
 
 // Función para obtener coordenadas de la ciudad
-async function obtenerCoordenadas(nombreCiudad: string) {
+async function obtenerCoordenadas(nombreCiudad: string): Promise<Coordinates> {
   const response = await fetch(
     `https://geocoding-api.open-meteo.com/v1/search?name=${nombreCiudad}&count=1&language=es&format=json`,
   );
@@ -29,8 +30,8 @@ async function obtenerCoordenadas(nombreCiudad: string) {
   const resultado = data.results?.[0];
   if (resultado) {
     return {
-      lat: resultado.latitude,
-      lon: resultado.longitude,
+      latitude: resultado.latitude,
+      longitude: resultado.longitude,
     };
   } else {
     throw new Error("Ciudad no encontrada");
@@ -38,14 +39,14 @@ async function obtenerCoordenadas(nombreCiudad: string) {
 }
 
 // Función para obtener el clima basado en coordenadas
-async function obtenerClima(lat: number, lon: number) {
+async function obtenerClima({ latitude, longitude }: Coordinates) {
   const response = await fetch(
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m`,
+    `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m`,
   );
   if (!response.ok) {
     throw new Error("No se pudo conectar con la API");
   }
-  const data = (await response.json()) as WeatherResponse;
+  const data = (await response.json()) as CurrentWeatherResponse;
   return data.current;
 }
 
@@ -57,15 +58,16 @@ async function ajustarUnidadTemperatura() {
 
   const respuesta = (await rl.question("Ingresa tu elección (1 o 2): ")).trim();
   console.log();
-  if (respuesta === "1") {
-    unidadTemperatura = "C";
-    console.log(green("Unidad de temperatura ajustada a Celsius (°C)."));
-  } else if (respuesta === "2") {
-    unidadTemperatura = "F";
-    console.log(green("Unidad de temperatura ajustada a Fahrenheit (°F)."));
-  } else {
+  const nuevaUnidad = respuesta === "1" ? "C" : respuesta === "2" ? "F" : null;
+
+  if (!nuevaUnidad) {
     console.log(red("Opción no válida."));
+    return;
   }
+
+  unidadTemperatura = nuevaUnidad;
+  const unidad = nuevaUnidad === "C" ? "Celsius (°C)" : "Fahrenheit (°F)";
+  console.log(green(`Unidad de temperatura ajustada a ${unidad}.`));
 }
 
 // Función para agregar ciudad
@@ -74,6 +76,11 @@ async function agregarCiudad() {
   console.log();
   try {
     await obtenerCoordenadas(ciudad);
+    const nuevasCiudades = [...ciudades, ciudad];
+    await guardarConfiguracion({
+      cities: nuevasCiudades,
+      defaultCity: ciudadDefault,
+    });
     ciudades.push(ciudad);
     console.log(green(`Ciudad ${ciudad} agregada exitosamente.`));
   } catch (error) {
@@ -97,7 +104,22 @@ async function eliminarCiudad() {
   console.log();
   const index = parseInt(numero, 10) - 1;
   if (index >= 0 && index < ciudades.length) {
-    const ciudadEliminada = ciudades.splice(index, 1);
+    const ciudadEliminada = ciudades[index]!;
+    const nuevasCiudades = ciudades.filter((_, ciudadIndex) => ciudadIndex !== index);
+    const nuevaCiudadDefault = ciudadDefault === ciudadEliminada ? null : ciudadDefault;
+
+    try {
+      await guardarConfiguracion({
+        cities: nuevasCiudades,
+        defaultCity: nuevaCiudadDefault,
+      });
+    } catch (error) {
+      console.log(red(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+
+    ciudades = nuevasCiudades;
+    ciudadDefault = nuevaCiudadDefault;
     console.log(green(`Ciudad ${ciudadEliminada} eliminada exitosamente.`));
   } else {
     console.log(red("Número de ciudad no válido."));
@@ -108,13 +130,63 @@ async function eliminarCiudad() {
 async function mostrarClima(ciudad: string) {
   try {
     const coords = await obtenerCoordenadas(ciudad);
-    const clima = await obtenerClima(coords.lat, coords.lon);
+    const clima = await obtenerClima(coords);
     const temperatura = unidadTemperatura === "F"
       ? (clima.temperature_2m * 9) / 5 + 32
       : clima.temperature_2m;
     console.log(
       `El clima actual en ${ciudad} es: ${yellow(temperatura.toFixed(1))} °${unidadTemperatura}`,
     );
+  } catch (error) {
+    console.log(red(error instanceof Error ? error.message : String(error)));
+  }
+}
+
+async function mostrarPronostico() {
+  if (ciudades.length === 0) {
+    console.log(red("No hay ciudades registradas."));
+    return;
+  }
+
+  console.log("Ciudades registradas:");
+  ciudades.forEach((ciudad, index) => {
+    console.log(`${index + 1}. ${ciudad}`);
+  });
+
+  const respuesta = await rl.question("Seleccione la ciudad para ver el pronóstico: ");
+  console.log();
+  const index = Number(respuesta.trim()) - 1;
+
+  if (!Number.isInteger(index) || index < 0 || index >= ciudades.length) {
+    console.log(red("Número de ciudad no válido."));
+    return;
+  }
+
+  const ciudad = ciudades[index]!;
+
+  try {
+    const coords = await obtenerCoordenadas(ciudad);
+    const pronostico = await obtenerPronostico(
+      coords.latitude,
+      coords.longitude,
+      unidadTemperatura,
+    );
+
+    console.log(cyan(`Pronóstico de 7 días para ${ciudad}:`));
+    const dateFormatter = new Intl.DateTimeFormat("es", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "UTC",
+    });
+
+    for (const dia of pronostico) {
+      const fecha = dateFormatter.format(new Date(`${dia.date}T00:00:00Z`));
+      const temperaturas = yellow(
+        `Mín. ${dia.minTemperature.toFixed(1)}° / Máx. ${dia.maxTemperature.toFixed(1)}°${unidadTemperatura}`,
+      );
+      console.log(`${fecha}: ${temperaturas}`);
+    }
   } catch (error) {
     console.log(red(error instanceof Error ? error.message : String(error)));
   }
@@ -150,8 +222,18 @@ async function establecerCiudadDefault() {
   console.log();
   const index = parseInt(numero, 10) - 1;
   if (index >= 0 && index < ciudades.length) {
-    ciudadDefault = ciudades[index]!;
-    console.log(green(`Ciudad default establecida a ${ciudadDefault}.`));
+    const nuevaCiudadDefault = ciudades[index]!;
+
+    try {
+      await guardarConfiguracion({
+        cities: ciudades,
+        defaultCity: nuevaCiudadDefault,
+      });
+      ciudadDefault = nuevaCiudadDefault;
+      console.log(green(`Ciudad default establecida a ${ciudadDefault}.`));
+    } catch (error) {
+      console.log(red(error instanceof Error ? error.message : String(error)));
+    }
   } else {
     console.log(red("Número de ciudad no válido."));
   }
@@ -179,6 +261,9 @@ const manejarOpcion = async (opcion: string): Promise<boolean> => {
     case "5":
       await establecerCiudadDefault();
       break;
+    case "6":
+      await mostrarPronostico();
+      break;
     case "8":
       await ajustarUnidadTemperatura();
       break;
@@ -204,6 +289,7 @@ function mostrarMenu() {
   console.log(cyan("  3. Buscar y agregar ciudad"));
   console.log(cyan("  4. Eliminar ciudad"));
   console.log(cyan("  5. Establecer ciudad default"));
+  console.log(cyan("  6. Pronóstico de 7 días"));
   console.log(cyan(`  8. Ajustes de unidad de temperatura (${celsius} / ${fahrenheit})`));
   console.log(cyan("  9. Salir"));
   console.log(cyan("════════════════════════════════════════"));
@@ -212,6 +298,10 @@ function mostrarMenu() {
 // Ejecución principal
 async function main() {
   try {
+    const config: AppConfig = await cargarConfiguracion();
+    ciudades = config.cities;
+    ciudadDefault = config.defaultCity;
+
     while (true) {
       mostrarMenu();
       console.log();
@@ -221,6 +311,9 @@ async function main() {
       if (!continuar) break;
       console.log();
     }
+  } catch (error) {
+    console.log(red(error instanceof Error ? error.message : String(error)));
+    process.exitCode = 1;
   } finally {
     rl.close();
   }
