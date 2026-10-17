@@ -188,15 +188,18 @@ const manejarOpcion = async (opcion: string): Promise<boolean> => {
 
 // Menú de opciones
 function mostrarMenu() {
+  const celsius = unidadTemperatura === "C" ? "°\x1b[4mC\x1b[0m" : "°C";
+  const fahrenheit = unidadTemperatura === "F" ? "°\x1b[4mF\x1b[0m" : "°F";
+
   console.log("════════════════════════════════════════");
   console.log("         WEATHER CLI");
   console.log("════════════════════════════════════════");
   console.log("  1. Clima de ciudad default");
-  console.log("  2. Clima de todas las ciudades (1)");
+  console.log(`  2. Clima de todas las ciudades (${ciudades.length})`);
   console.log("  3. Buscar y agregar ciudad");
   console.log("  4. Eliminar ciudad");
   console.log("  5. Establecer ciudad default");
-  console.log("  8. Ajustes de unidad de temperatura (°C / °F)");
+  console.log(`  8. Ajustes de unidad de temperatura (${celsius} / ${fahrenheit})`);
   console.log("  9. Salir");
   console.log("════════════════════════════════════════");
 }
