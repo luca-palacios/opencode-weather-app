@@ -13,6 +13,15 @@ El objetivo de esta aplicación es que creemos una aplicación de consola que pi
 - Bun.js
 - OpenMeteo
 
+## Pruebas y compilación
+
+```bash
+bun run test
+bun run build
+```
+
+La compilación ejecuta primero todas las pruebas de `tests/` y se detiene si alguna falla.
+
 ## Ejemplo de petición http:
 
 1. Paso 1: Geocoding API.
